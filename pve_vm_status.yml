@@ -47,6 +47,7 @@
   hosts: localhost
   gather_facts: no
 
+  # module_defaults for the collection modules used below (keeps task calls concise)
   module_defaults:
     community.proxmox.proxmox_vm_info:
       api_host: "{{ pm_api_host }}"
@@ -55,8 +56,63 @@
       api_token_id: "{{ api_token_id }}"
       api_token_secret: "{{ api_token_secret | default(pm_api_token_secret) }}"
       validate_certs: "{{ pm_api_validate_certs }}"
+    community.proxmox.proxmox_node_info:
+      api_host: "{{ pm_api_host }}"
+      api_port: "{{ pm_api_port }}"
+      api_user: "{{ api_user }}"
+      api_token_id: "{{ api_token_id }}"
+      api_token_secret: "{{ api_token_secret | default(pm_api_token_secret) }}"
+      validate_certs: "{{ pm_api_validate_certs }}"
 
   tasks:
+    - name: Get node(s) info (module returns all nodes; we filter locally)
+      community.proxmox.proxmox_node_info:
+        # NOTE: do NOT pass a "node" parameter many module versions return all nodes and don't accept node.
+      register: node_info
+
+    - name: Fail if node_info contains no nodes
+      fail:
+        msg: "Proxmox API returned no nodes. Check API credentials / pm_api_host."
+      when: node_info.proxmox_nodes | default([]) | length == 0
+
+    - name: Initialize node RAM map (node -> max RAM GiB)
+      set_fact:
+        node_ram_map: {}
+      changed_when: false
+
+    - name: Build node_ram_map from node_info
+      set_fact:
+        node_ram_map: >-
+          {{ node_ram_map | combine({
+               (item.node | default('unknown')): ((item.maxmem | default(0) | int) / (1024.0**3)) | round(2)
+             }) }}
+      loop: "{{ node_info.proxmox_nodes | default([]) }}"
+      changed_when: false
+
+    - name: If pm_node specified - find that node record
+      set_fact:
+        pm_node_record: >-
+          {{ (node_info.proxmox_nodes | selectattr('node','equalto', pm_node) | list | first) | default({}) }}
+      when: pm_node is defined and pm_node | length > 0
+      changed_when: false
+
+    - name: Fail when pm_node specified but not found
+      fail:
+        msg: "pm_node '{{ pm_node }}' not found in Proxmox cluster. Discovered nodes: {{ node_info.proxmox_nodes | map(attribute='node') | list }}"
+      when:
+        - pm_node is defined
+        - pm_node | length > 0
+        - pm_node_record | length == 0
+
+    - name: Show discovered node RAM(s) or selected node
+      debug:
+        msg: >-
+          {% if pm_node is defined and pm_node|length > 0 %}
+          Node "{{ pm_node }}" host max RAM: {{ node_ram_map[pm_node] | default('UNKNOWN') }} GiB
+          {% else %}
+          Discovered nodes and host max RAM (GiB): {{ node_ram_map }}
+          {% endif %}
+
     - name: Get VMs/LXCs (all nodes unless pm_node is defined)
       community.proxmox.proxmox_vm_info:
         type: all
@@ -110,7 +166,6 @@
         total_used_ram_gi: "{{ vm_sorted | map(attribute='USED_Gi') | sum | default(0.0) }}"
         total_max_ram_gi:  "{{ vm_sorted | map(attribute='MAX_Gi')  | sum | default(0.0) }}"
         used_pct_total: "{{ (total_max_ram_gi|float > 0) | ternary((total_used_ram_gi/total_max_ram_gi*100.0), 0.0) }}"
-        # CPU summary over running guests only (more meaningful)
         running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
         running_cpu_sum: "{{ running_list | map(attribute='CPU_pct') | list | sum | default(0.0) }}"
         running_count: "{{ running_list | length }}"
@@ -149,38 +204,59 @@
                 )
               }}
 
-    - name: Headroom check (running-only and all-guests scenarios)
-      vars:
-        # sums from previously computed vm_sorted
+    - name: Compute guests_max_bytes
+      set_fact:
+        guests_max_bytes: "{{ vm_info.proxmox_vms | default([]) | map(attribute='maxmem') | select('defined') | map('int') | sum }}"
+      changed_when: false
+
+    - name: Compute guests_max_gib
+      set_fact:
+        guests_max_gib: "{{ (guests_max_bytes / (1024.0**3)) | float | round(2) }}"
+      changed_when: false
+
+    - name: Build running/all MAX sums and running list
+      set_fact:
         running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
         running_max_sum: "{{ running_list | map(attribute='MAX_Gi') | sum | default(0.0) }}"
         all_max_sum: "{{ vm_sorted | map(attribute='MAX_Gi') | sum | default(0.0) }}"
+      changed_when: false
 
-        # host_ram_gib: prefer explicit var (group_vars/all/main.yml). If absent, fall back to 'all_max_sum'
-        resolved_host_ram_gib: "{{ host_ram_gib | default(all_max_sum) }}"
+    - name: If host_ram_gib explicitly provided in vars, use it
+      set_fact:
+        resolved_host_ram_gib: "{{ (host_ram_gib | float) }}"
+      when: host_ram_gib is defined
 
-        headroom_running: "{{ (resolved_host_ram_gib - running_max_sum) | round(1) }}"
-        headroom_all: "{{ (resolved_host_ram_gib - all_max_sum) | round(1) }}"
+    - name: Else if pm_node specified (and node_ram_map has entry) use node's API value
+      set_fact:
+        resolved_host_ram_gib: "{{ (node_ram_map[pm_node] | float) }}"
+      when:
+        - resolved_host_ram_gib is not defined
+        - pm_node is defined
+        - pm_node | length > 0
 
-        status_running: >-
-          {{
-            (resolved_host_ram_gib >= running_max_sum)
-            | ternary('OK', 'TIGHT/RISK')
-          }}
-        status_all: >-
-          {{
-            (resolved_host_ram_gib >= all_max_sum)
-            | ternary('OK', 'TIGHT/RISK')
-          }}
+    - name: Else fallback to conservative sum-of-all-guests MAXs
+      set_fact:
+        resolved_host_ram_gib: "{{ (all_max_sum | float) }}"
+      when: resolved_host_ram_gib is not defined
 
+    - name: Compute headroom and status facts
+      set_fact:
+        headroom_running: "{{ (resolved_host_ram_gib - running_max_sum) | round(2) }}"
+        headroom_all:     "{{ (resolved_host_ram_gib - all_max_sum) | round(2) }}"
+        status_running:   "{{ (resolved_host_ram_gib | float >= running_max_sum | float) | ternary('OK', 'TIGHT/RISK') }}"
+        status_all:       "{{ (resolved_host_ram_gib | float >= all_max_sum | float)     | ternary('OK', 'TIGHT/RISK') }}"
+      changed_when: false
+
+    - name: Show headroom summary (explicit and safe)
       debug:
         msg: |
           {% if host_ram_gib is defined %}
-          Host RAM (from group_vars): {{ resolved_host_ram_gib }} Gi
+          Host RAM (explicit host_ram_gib): {{ resolved_host_ram_gib }} Gi
+          {% elif pm_node is defined and pm_node|length > 0 %}
+          Host RAM (from API for node {{ pm_node }}): {{ resolved_host_ram_gib }} Gi
           {% else %}
-          WARNING: host_ram_gib is NOT defined in your vars. Using conservative fallback = sum of guest MAXs ({{ all_max_sum }} Gi).
-          Please set host_ram_gib in group_vars/all/main.yml for an accurate headroom check.
+          WARNING: host_ram_gib not defined and pm_node not specified, using conservative fallback = sum of guests' MAXs ({{ all_max_sum }} Gi)
           {% endif %}
 
           Running guests: {{ running_list|length }} | Running MAX sum: {{ running_max_sum }} Gi | Headroom if all running at MAX: {{ headroom_running }} Gi | Status: {{ status_running }}
-          All guests: {{ vm_sorted|length }} | All MAX sum: {{ all_max_sum }} Gi | Headroom if all guests at MAX: {{ headroom_all }} Gi | Status: {{ status_all }}
+          All guests:     {{ vm_sorted|length }} | All MAX sum:     {{ all_max_sum }} Gi | Headroom if all guests at MAX: {{ headroom_all }} Gi | Status: {{ status_all }}
