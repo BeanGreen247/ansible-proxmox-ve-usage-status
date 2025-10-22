@@ -1,7 +1,7 @@
-# Proxmox Per-VM Memory Usage (API-First via community.proxmox)
+# Proxmox Per-VM CPU and Memory Usage (API-First via community.proxmox)
 #
 # Overview
-#   Query and report live memory usage for all VMs and LXCs across one or more Proxmox nodes.
+#   Query and report live CPU and memory usage for all VMs and LXCs across one or more Proxmox nodes.
 #   Fully API-driven using the community.proxmox collection - no SSH or sudo on nodes required.
 #   Safe to run repeatedly; does not modify cluster state.
 #
