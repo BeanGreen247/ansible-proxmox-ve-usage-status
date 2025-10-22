@@ -12,6 +12,8 @@
 #       - USED_Gi (used memory in GiB)
 #       - MAX_Gi  (configured memory in GiB)
 #       - USED_pct (percent of total)
+#       - CPU_pct (current CPU usage %)
+#       - vCPUs (configured vCPU count)
 #   * Sorts VMs (running first, then by USED_Gi descending)
 #   * Prints a clean, compact list - one line per VM/LXC plus overall totals
 #
@@ -26,12 +28,6 @@
 #   Proxmox API connection:
 #     pm_api_host, pm_api_port, api_user, api_token_id, api_token_secret,
 #     pm_api_validate_certs, pm_node (optional)
-#
-# Output example
-#     starhaven/101  dev.bean                        running  4.5Gi/7.9Gi (56.7%)
-#     starhaven/106  navidrome-bean                  running  1.0Gi/2.0Gi (49.0%)
-#     starhaven/109  rhel-bean                       stopped  0.0Gi/4.0Gi (0.0%)
-#     Total: 9 guests | Running: 6 | Stopped: 3 | Used: 13.1 Gi / 55.7 Gi (23.5%)
 #
 # Quick start
 #   1) Ensure Proxmox API token credentials are defined (vaulted or via env vars)
@@ -93,7 +89,6 @@
       no_log: true
       changed_when: false
 
-    # keep the existing ordering: running first, then by absolute RAM used (GiB) desc
     - name: Order rows (running first, then by USED_Gi desc)
       set_fact:
         vm_sorted: >-
@@ -139,7 +134,7 @@
           loop: "{{ vm_sorted }}"
           loop_control:
             label: "{{ item.node }}/{{ item.vmid }}"
-    
+
         - name: Totals
           debug:
             msg: >-
@@ -153,3 +148,39 @@
                   avg_cpu_running
                 )
               }}
+
+    - name: Headroom check (running-only and all-guests scenarios)
+      vars:
+        # sums from previously computed vm_sorted
+        running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
+        running_max_sum: "{{ running_list | map(attribute='MAX_Gi') | sum | default(0.0) }}"
+        all_max_sum: "{{ vm_sorted | map(attribute='MAX_Gi') | sum | default(0.0) }}"
+
+        # host_ram_gib: prefer explicit var (group_vars/all/main.yml). If absent, fall back to 'all_max_sum'
+        resolved_host_ram_gib: "{{ host_ram_gib | default(all_max_sum) }}"
+
+        headroom_running: "{{ (resolved_host_ram_gib - running_max_sum) | round(1) }}"
+        headroom_all: "{{ (resolved_host_ram_gib - all_max_sum) | round(1) }}"
+
+        status_running: >-
+          {{
+            (resolved_host_ram_gib >= running_max_sum)
+            | ternary('OK', 'TIGHT/RISK')
+          }}
+        status_all: >-
+          {{
+            (resolved_host_ram_gib >= all_max_sum)
+            | ternary('OK', 'TIGHT/RISK')
+          }}
+
+      debug:
+        msg: |
+          {% if host_ram_gib is defined %}
+          Host RAM (from group_vars): {{ resolved_host_ram_gib }} Gi
+          {% else %}
+          WARNING: host_ram_gib is NOT defined in your vars. Using conservative fallback = sum of guest MAXs ({{ all_max_sum }} Gi).
+          Please set host_ram_gib in group_vars/all/main.yml for an accurate headroom check.
+          {% endif %}
+
+          Running guests: {{ running_list|length }} | Running MAX sum: {{ running_max_sum }} Gi | Headroom if all running at MAX: {{ headroom_running }} Gi | Status: {{ status_running }}
+          All guests: {{ vm_sorted|length }} | All MAX sum: {{ all_max_sum }} Gi | Headroom if all guests at MAX: {{ headroom_all }} Gi | Status: {{ status_all }}

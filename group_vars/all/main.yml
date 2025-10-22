@@ -26,3 +26,8 @@ pm_node: "starhaven"
 # host/IP only, no scheme, no port
 pm_api_host: "starhaven"
 pm_api_port: 8006
+
+# Optional: set your host physical RAM in GiB for headroom checks
+# e.g. host_ram_gib: 64
+# If omitted, the playbook warns and falls back to the sum of guest MAXs (conservative).
+# host_ram_gib: 64
