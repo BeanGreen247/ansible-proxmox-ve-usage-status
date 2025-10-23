@@ -164,7 +164,7 @@
     - name: Print simple list (one line per VM, then totals)
       vars:
         total_used_ram_gi: "{{ vm_sorted | map(attribute='USED_Gi') | sum | default(0.0) }}"
-        total_max_ram_gi:  "{{ vm_sorted | map(attribute='MAX_Gi')  | sum | default(0.0) }}"
+        total_max_ram_gi:  "{{ node_ram_map[pm_node] | default(0.0) }}"
         used_pct_total: "{{ (total_max_ram_gi|float > 0) | ternary((total_used_ram_gi/total_max_ram_gi*100.0), 0.0) }}"
         running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
         running_cpu_sum: "{{ running_list | map(attribute='CPU_pct') | list | sum | default(0.0) }}"
@@ -181,14 +181,34 @@
                   (item.name|default('-'))[:32],
                   item.status|default('-'),
                   item.CPU_pct|default(0.0),
-                  item.USED_Gi|default(0.0),
-                  item.MAX_Gi|default(0.0),
+                  (item.mem / (1024.0**3)) | float | round(2),
+                  (item.maxmem / (1024.0**3)) | float | round(2),
                   item.USED_pct|default(0.0)
                 )
               }}
           loop: "{{ vm_sorted }}"
           loop_control:
             label: "{{ item.node }}/{{ item.vmid }}"
+
+        - name: Get proxmox nodes current ram used
+          set_fact:
+            node_current_ram_used: >-
+              {%- if (pm_node is defined and pm_node | length > 0) -%}
+                {{ (
+                    (node_info.proxmox_nodes
+                      | selectattr('node','equalto', pm_node)
+                      | map(attribute='mem')
+                      | list
+                     )
+                     | first | default(0)
+                   ) / (1024.0**3) | float | round(2) }}
+              {%- else -%}
+                {{ (node_info.proxmox_nodes
+                     | map(attribute='mem')
+                     | sum
+                   ) / (1024.0**3) | float | round(2) }}
+              {%- endif -%}
+          changed_when: false
 
         - name: Totals
           debug:
@@ -199,7 +219,7 @@
                   (vm_sorted|length),
                   running_count,
                   ((vm_sorted|length) - running_count),
-                  total_used_ram_gi, total_max_ram_gi, used_pct_total,
+                  node_current_ram_used, total_max_ram_gi, used_pct_total,
                   avg_cpu_running
                 )
               }}
@@ -214,12 +234,18 @@
         guests_max_gib: "{{ (guests_max_bytes / (1024.0**3)) | float | round(2) }}"
       changed_when: false
 
-    - name: Build running/all MAX sums and running list
+    - name: Build running/all MAX sums and running list (use maxmem bytes -> GiB)
       set_fact:
         running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
-        running_max_sum: "{{ running_list | map(attribute='MAX_Gi') | sum | default(0.0) }}"
-        all_max_sum: "{{ vm_sorted | map(attribute='MAX_Gi') | sum | default(0.0) }}"
+        running_max_sum: >-
+          {{ ( (vm_sorted
+                | selectattr('status','equalto','running')
+                | map(attribute='maxmem') | map('int') | sum
+              ) / (1024.0**3) ) | float | round(2) }}
+        all_max_sum: >-
+          {{ ( (vm_sorted | map(attribute='maxmem') | map('int') | sum) / (1024.0**3) ) | float | round(2) }}
       changed_when: false
+
 
     - name: If host_ram_gib explicitly provided in vars, use it
       set_fact:
