@@ -163,8 +163,12 @@
 
     - name: Print simple list (one line per VM, then totals)
       vars:
-        total_used_ram_gi: "{{ vm_sorted | map(attribute='USED_Gi') | sum | default(0.0) }}"
+        # prefer host-reported current used RAM if available, otherwise fall back to sum of guest USED_Gi
+        total_used_ram_gi: >-
+          {{ (node_current_ram_used is defined and node_current_ram_used | float > 0)
+             | ternary(node_current_ram_used | float, (vm_sorted | map(attribute='USED_Gi') | sum | default(0.0))) }}
         total_max_ram_gi:  "{{ node_ram_map[pm_node] | default(0.0) }}"
+        # used_pct_total is based on displayed total_used_ram_gi
         used_pct_total: "{{ (total_max_ram_gi|float > 0) | ternary((total_used_ram_gi/total_max_ram_gi*100.0), 0.0) }}"
         running_list: "{{ vm_sorted | selectattr('status','equalto','running') | list }}"
         running_cpu_sum: "{{ running_list | map(attribute='CPU_pct') | list | sum | default(0.0) }}"
@@ -219,7 +223,7 @@
                   (vm_sorted|length),
                   running_count,
                   ((vm_sorted|length) - running_count),
-                  node_current_ram_used, total_max_ram_gi, used_pct_total,
+                  total_used_ram_gi, total_max_ram_gi, used_pct_total,
                   avg_cpu_running
                 )
               }}
