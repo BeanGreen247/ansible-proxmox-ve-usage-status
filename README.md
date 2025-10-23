@@ -207,7 +207,7 @@ loop_control:
   label: "{{ item.node }}/{{ item.vmid }}"
 ```
 
-For prettier output (no extra JSON or ok-lines):
+For prettier and proper looking output (no extra JSON or ok-lines):
 
 ```bash
 ANSIBLE_STDOUT_CALLBACK=community.general.yaml ansible-playbook -i inventory/hosts.ini pve_vm_status.yml
