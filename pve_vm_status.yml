@@ -134,7 +134,7 @@
                    'MAX_Gi':   (item.maxmem | default(0) | float / 1073741824),
                    'USED_pct': ((item.maxmem | default(0) | float) > 0)
                                 | ternary( (item.mem | default(0) | float / (item.maxmem | float) * 100.0), 0.0),
-                   'CPU_pct':  (item.cpu | default(0) | float * 100.0),
+                   'CPU_pct':  (item.cpu | default(item.cpu) | float * 100.0),
                    'vCPUs':    (item.maxcpu | default(item.cpus | default(0)))
                  })
                ]
