@@ -1,0 +1,18 @@
+ansible_become: true
+ansible_become_method: sudo
+ansible_become_password: "{{ vault_become_password }}"
+vault_become_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          6...6
+
+api_user: "root@pam"
+api_token_id: "ansible-automation"
+api_token_secret: "{{ pm_api_token_secret | trim }}"
+pm_api_token_secret: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          3...9
+pm_api_validate_certs: false
+pm_node: "starhaven"
+# host/IP only, no scheme, no port
+pm_api_host: "starhaven"
+pm_api_port: 8006

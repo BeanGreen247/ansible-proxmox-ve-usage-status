@@ -1,2 +1,3 @@
 collections/ansible_collections
 collections/ansible_collections/
+group_vars/all/main.yml
