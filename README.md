@@ -25,8 +25,7 @@ Results are ordered by **actual used memory (GiB)** so the largest RAM consumers
 
 ## Project Structure
 
-```
-
+```tree
 .
 ├── ansible.cfg
 ├── collections
@@ -42,7 +41,6 @@ Results are ordered by **actual used memory (GiB)** so the largest RAM consumers
 ├── LICENSE
 ├── pve_vm_status.yml
 └── README.md
-
 ```
 
 ---
@@ -53,13 +51,27 @@ Results are ordered by **actual used memory (GiB)** so the largest RAM consumers
 
 ```bash
 apt install ansible-core sudo python3 python3-pip
-pip install ansible-dev-tools --break-system-packages
+pip install ansible-dev-tools --no-input --break-system-packages
 ```
 
 ### On the **controller (your machine)**
 
+Install Ansible and required Python libraries:
+
 ```bash
-python3 -m pip install --user proxmoxer requests --break-system-packages
+sudo apt install ansible ansible-core ansible-lint python3 python3-pip
+```
+
+Install Python dependencies for Proxmox API access:
+
+```bash
+python3 -m pip install --user proxmoxer requests --break-system-packages --no-warn-script-location
+```
+
+Optionally install development tools:
+
+```bash
+python3 -m pip install ansible-dev-tools --no-input --break-system-packages --no-warn-script-location
 ```
 
 ### Install required collections
@@ -74,15 +86,18 @@ ansible-galaxy collection install -r collections/requirements.yml -p ./collectio
 
 Create a dedicated API token in Proxmox:
 
-* **User:** `root@pam` (or another automation user)
-* **Token ID:** `ansible-automation`
-* **Permissions:** VM.Audit or VM.Monitor (read-only is enough)
+- **User:** `root@pam` (or another automation user)
+
+- **Token ID:** `ansible-automation`
+- **Permissions:**
+  - `VM.Audit` or `VM.Monitor` (read VM/LXC data)
+  - `Sys.Audit` (read node memory statistics - optional but recommended)
 
 Store secrets safely with Ansible Vault:
 
 ```bash
-ansible-vault encrypt_string --name 'vault_become_password' --vault-id default@prompt 'your_sudo_password'
-ansible-vault encrypt_string --name 'pm_api_token_secret' --vault-id default@prompt 'your_proxmox_token_secret'
+ansible-vault encrypt_string --name 'vault_become_password' --encrypt-vault-id default # sudo password
+ansible-vault encrypt_string --name 'pm_api_token_secret' --encrypt-vault-id default # your proxmox token secret
 ```
 
 Add them to:
@@ -145,7 +160,7 @@ ansible-playbook -i inventory/hosts.ini pve_vm_status.yml
 
 ### Example Output
 
-```
+```bash
 starhaven/101  dev.bean                        running  CPU: 12.0%  RAM: 4.5Gi/7.9Gi (56.7%)
 starhaven/106  navidrome-bean                  running  CPU:  3.2%  RAM: 1.0Gi/2.0Gi (49.0%)
 starhaven/109  rhel-bean                       stopped  CPU:  0.0%  RAM: 0.0Gi/4.0Gi (0.0%)
@@ -166,8 +181,8 @@ ansible-playbook -i inventory/hosts.ini pve_vm_status.yml -o json
 
 | Dependency          | Version | Purpose                      |
 | ------------------- | ------- | ---------------------------- |
-| `community.proxmox` | 1.3.0  | API modules for Proxmox      |
-| `community.general` | 11.0.0 | Utility filters & formatting |
+| `community.proxmox` | 1.3.0   | API modules for Proxmox      |
+| `community.general` | 11.0.0  | Utility filters & formatting |
 | `proxmoxer`         | latest  | Python API backend           |
 | `requests`          | latest  | HTTP transport for proxmoxer |
 
@@ -177,24 +192,23 @@ Defined in [`collections/requirements.yml`](collections/requirements.yml).
 
 ## Notes & Caveats
 
-* Read-only - **no changes** are made to the Proxmox environment
-* Works with both VMs (QEMU) and containers (LXC)
-* Metrics reflect the current API snapshot; brief spikes may be averaged by Proxmox
-* For multi-node clusters, omit `pm_node` in `main.yml` to auto-collect all
+- Read-only - **no changes** are made to the Proxmox environment
+- Works with both VMs (QEMU) and containers (LXC)
+- Metrics reflect the current API snapshot; brief spikes may be averaged by Proxmox
+- For multi-node clusters, omit `pm_node` in `main.yml` to auto-collect all
 
 ### What this playbook does
 
-* Collects VM/LXC metadata via the Proxmox REST API
-* Filters out templates
-* Enriches each item with:
-
-  * `USED_Gi` (used memory in GiB)
-  * `MAX_Gi` (configured memory in GiB)
-  * `USED_pct` (percent of max)
-  * `CPU_pct` (current guest CPU usage, 0-100%)
-  * `vCPUs` (configured virtual CPUs)
-* **Sorts by `USED_Gi` (descending)** - running first - then prints a compact list + totals
-* Computes **Avg CPU over running** guests for a quick cluster health signal
+- Collects VM/LXC metadata via the Proxmox REST API
+- Filters out templates
+- Enriches each item with:
+  - `USED_Gi` (used memory in GiB)
+  - `MAX_Gi` (configured memory in GiB)
+  - `USED_pct` (percent of max)
+  - `CPU_pct` (current guest CPU usage, 0-100%)
+  - `vCPUs` (configured virtual CPUs)
+- **Sorts by `USED_Gi` (descending)** - running first - then prints a compact list + totals
+- Computes **Avg CPU over running** guests for a quick cluster health signal
 
 ---
 
@@ -210,11 +224,11 @@ loop_control:
 For prettier and proper looking output (no extra JSON or ok-lines):
 
 ```bash
-ANSIBLE_STDOUT_CALLBACK=community.general.yaml ansible-playbook -i inventory/hosts.ini pve_vm_status.yml
+result_format=yaml ansible-playbook -i inventory/hosts.ini pve_vm_status.yml
 ```
 
 ---
 
 ## Author
 
-Thomas Mozdren, 2025
+Thomas Mozdren, 2026
