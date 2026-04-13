@@ -1,3 +1,8 @@
+> [!WARNING]
+> **This repository has been consolidated.**
+> Development continues at [BeanGreen247/ansible-proxmox](https://github.com/BeanGreen247/ansible-proxmox), which combines this repo with [ansible-proxmox-update-upgrade](https://github.com/BeanGreen247/ansible-proxmox-update-upgrade) and [proxmox-ve-vms-ansible](https://github.com/BeanGreen247/proxmox-ve-vms-ansible) into a single workspace.
+> This repo is archived and will no longer receive updates.
+
 # Proxmox Per-VM Current Usage Status
 
 Query and report **live CPU and memory usage** for all VMs and LXCs across one or more Proxmox nodes using pure API calls - **no sudo required**.  
